@@ -8,11 +8,10 @@ from src.config import DB_PATH
 def get_conn() -> sqlite3.Connection:
     if not os.path.exists(DB_PATH):
         try:
-            import subprocess, sys
-            script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "seed_db.py")
-            subprocess.run([sys.executable, script], check=True)
-        except Exception:
-            pass
+            from seed_db import seed_database
+            seed_database(DB_PATH)
+        except Exception as e:
+            print("Auto-seeding DB failed:", e)
 
     conn = sqlite3.connect(DB_PATH, isolation_level=None)
     conn.row_factory = sqlite3.Row

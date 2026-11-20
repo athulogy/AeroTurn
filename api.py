@@ -29,6 +29,15 @@ app = FastAPI(
 )
 
 
+@app.on_event("startup")
+def startup_event():
+    try:
+        conn = get_conn()
+        conn.close()
+    except Exception as e:
+        print("Startup DB init error:", e)
+
+
 @app.get("/", response_class=HTMLResponse, summary="Interactive OCC Mission Control UI")
 def api_dashboard():
     return HTML_DASHBOARD
