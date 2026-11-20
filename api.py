@@ -132,11 +132,10 @@ def api_audit_logs(limit: int = 50):
 @app.post("/reset_db", summary="Re-seed the database (dev/demo use only)")
 def api_reset_db():
     try:
-        import subprocess, sys, os
-        script = os.path.join(os.path.dirname(__file__), "seed_db.py")
-        subprocess.run([sys.executable, script], check=True)
+        from seed_db import seed_database
+        seed_database()
     except Exception as e:
-        pass
+        print("Reset DB error:", e)
     conn = get_conn()
     write_audit_log(
         conn,
@@ -174,41 +173,40 @@ HTML_DASHBOARD = """<!DOCTYPE html>
       min-height: 100vh;
       overflow-x: hidden;
     }
-    /* Liquid Glass Effect */
+    /* Optimized High-Performance Liquid Glass */
     .liquid-glass {
-      background: rgba(15, 23, 42, 0.65);
-      backdrop-filter: blur(24px) saturate(190%);
-      -webkit-backdrop-filter: blur(24px) saturate(190%);
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
       border: 1px solid rgba(255, 255, 255, 0.08);
       box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.12);
       border-radius: 20px;
+      transform: translateZ(0);
+      will-change: transform;
     }
     .liquid-card {
-      background: rgba(30, 41, 59, 0.45);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(30, 41, 59, 0.65);
+      border: 1px solid rgba(255, 255, 255, 0.07);
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-      border-radius: 14px;
-      transition: all 0.25s ease;
+      border-radius: 12px;
+      transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
     }
     .liquid-card:hover {
-      border-color: rgba(56, 189, 248, 0.3);
-      box-shadow: 0 10px 30px -10px rgba(14, 165, 233, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      background: rgba(30, 41, 59, 0.85);
+      border-color: rgba(56, 189, 248, 0.35);
       transform: translateY(-1px);
     }
     .liquid-btn {
-      background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
-      backdrop-filter: blur(12px);
+      background: rgba(255, 255, 255, 0.05);
       border: 1px solid rgba(255, 255, 255, 0.1);
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
       border-radius: 12px;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: all 0.15s ease;
     }
     .liquid-btn:hover {
-      transform: translateY(-2px);
+      background: rgba(255, 255, 255, 0.1);
       border-color: rgba(56, 189, 248, 0.4);
-      box-shadow: 0 8px 25px -5px rgba(14, 165, 233, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      transform: translateY(-1px);
     }
     .liquid-btn:active {
       transform: translateY(0);
@@ -485,13 +483,60 @@ HTML_DASHBOARD = """<!DOCTYPE html>
   </div>
 
   <script>
+    let lastStateHash = '';
+    let lastLogsHash = '';
+    let isFetching = false;
+
     async function fetchState() {
+      if (isFetching) return;
+      isFetching = true;
       try {
-        const res = await fetch('/get_turnaround_and_crew_state');
-        const data = await res.json();
-        
-        // Crew List
-        const crewList = document.getElementById('crew-list');
+        const [stateRes, logsRes] = await Promise.all([
+          fetch('/get_turnaround_and_crew_state'),
+          fetch('/audit_logs?limit=25')
+        ]);
+
+        if (stateRes.ok) {
+          const stateData = await stateRes.json();
+          const stateStr = JSON.stringify(stateData);
+          if (stateStr !== lastStateHash) {
+            lastStateHash = stateStr;
+            renderState(stateData);
+          }
+        }
+
+        if (logsRes.ok) {
+          const logsData = await logsRes.json();
+          const logsStr = JSON.stringify(logsData);
+          if (logsStr !== lastLogsHash) {
+            lastLogsHash = logsStr;
+            renderAuditLogs(logsData);
+          }
+        }
+      } catch (e) {
+        console.error("State sync error:", e);
+      } finally {
+        isFetching = false;
+      }
+    }
+
+    function renderState(data) {
+      if (data.flight) {
+        const fElem = document.getElementById('kpi-flight');
+        if (fElem) fElem.innerText = `${data.flight.flight_no} (${data.flight.origin || 'RUH'})`;
+      }
+      if (data.crew && data.crew.length) {
+        const minMargin = Math.min(...data.crew.map(c => c.duty_remaining_mins || 0));
+        const cElem = document.getElementById('kpi-crew');
+        if (cElem) cElem.innerText = `${minMargin} mins`;
+      }
+      if (data.at_risk_passengers !== undefined) {
+        const pElem = document.getElementById('kpi-pax');
+        if (pElem) pElem.innerText = `${data.at_risk_passengers} Passengers`;
+      }
+      
+      const crewList = document.getElementById('crew-list');
+      if (crewList) {
         crewList.innerHTML = (data.crew || []).map(c => `
           <div class="liquid-card p-2.5 flex justify-between items-center text-xs">
             <div>
@@ -503,69 +548,62 @@ HTML_DASHBOARD = """<!DOCTYPE html>
             </div>
           </div>
         `).join('');
+      }
 
-        // Maintenance List
-        const maintList = document.getElementById('maint-list');
+      const maintList = document.getElementById('maint-list');
+      if (maintList) {
         maintList.innerHTML = (data.maintenance_logs || []).map(m => `
           <div class="liquid-card p-2.5 flex justify-between items-center text-xs">
             <div><b class="text-white">${m.log_id}</b>: ${m.issue}</div>
             <span class="px-2 py-0.5 rounded text-[10px] font-bold ${m.signoff_status === 'OPEN' ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'}">${m.signoff_status}</span>
           </div>
         `).join('');
+      }
 
-        // Inventory List
-        const invList = document.getElementById('inv-list');
+      const invList = document.getElementById('inv-list');
+      if (invList) {
         invList.innerHTML = (data.onward_inventory || []).map(i => `
           <div class="liquid-card p-2.5 flex justify-between items-center text-xs">
             <div><b class="text-white">${i.flight_no}</b> <span class="text-slate-400">(${i.destination})</span></div>
             <div class="font-mono">${i.available_seats} seats ${i.force_conflict ? '<span class="text-amber-400 text-[10px] ml-1">[Conflict Injected]</span>' : ''}</div>
           </div>
         `).join('');
-
-        loadAuditLogs();
-      } catch (e) {
-        console.error(e);
       }
     }
 
-    async function loadAuditLogs() {
-      try {
-        const res = await fetch('/audit_logs?limit=30');
-        const logs = await res.json();
-        const list = document.getElementById('audit-list');
-        
-        if (!logs.length) {
-          list.innerHTML = '<div class="text-xs text-slate-500 text-center py-16">No audit entries yet. Trigger any scenario to see real-time execution.</div>';
-          return;
-        }
+    function renderAuditLogs(logs) {
+      const list = document.getElementById('audit-list');
+      if (!list) return;
+      if (!logs || !logs.length) {
+        list.innerHTML = '<div class="text-xs text-slate-500 text-center py-16">No audit entries yet. Trigger any scenario to see real-time execution.</div>';
+        return;
+      }
 
-        list.innerHTML = logs.map(l => {
-          let badgeClass = 'badge-ok';
-          if (l.result === 'BLOCKED' || l.result === 'HARD_BLOCKED') badgeClass = 'badge-blocked';
-          else if (l.result === 'ROLLBACK' || l.result === 'ESCALATED') badgeClass = 'badge-rollback';
+      list.innerHTML = logs.map(l => {
+        let badgeClass = 'badge-ok';
+        if (l.result === 'BLOCKED' || l.result === 'HARD_BLOCKED') badgeClass = 'badge-blocked';
+        else if (l.result === 'ROLLBACK' || l.result === 'ESCALATED') badgeClass = 'badge-rollback';
 
-          const time = l.timestamp.includes('T') ? l.timestamp.split('T')[1].substring(0, 8) : l.timestamp;
+        const time = l.timestamp.includes('T') ? l.timestamp.split('T')[1].substring(0, 8) : l.timestamp;
 
-          return `
-            <div class="liquid-card p-3 space-y-1.5">
-              <div class="flex justify-between items-center">
-                <span class="text-[10px] text-slate-400 font-mono">${time} • <b class="text-slate-300">${l.actor || 'system'}</b></span>
-                <span class="${badgeClass} text-[10px] px-2 py-0.5 rounded font-mono">${l.result}</span>
-              </div>
-              <div class="font-bold text-white text-xs">${l.event_type}</div>
-              <div class="text-slate-300 text-[11px] leading-relaxed">${l.details}</div>
+        return `
+          <div class="liquid-card p-3 space-y-1.5">
+            <div class="flex justify-between items-center">
+              <span class="text-[10px] text-slate-400 font-mono">${time} • <b class="text-slate-300">${l.actor || 'system'}</b></span>
+              <span class="${badgeClass} text-[10px] px-2 py-0.5 rounded font-mono">${l.result}</span>
             </div>
-          `;
-        }).join('');
-      } catch (e) {
-        console.error(e);
-      }
+            <div class="font-bold text-white text-xs">${l.event_type}</div>
+            <div class="text-slate-300 text-[11px] leading-relaxed">${l.details}</div>
+          </div>
+        `;
+      }).join('');
     }
 
-    async function showBanner(title, result) {
+    function showBanner(title, result) {
       const banner = document.getElementById('action-banner');
       const bTitle = document.getElementById('banner-title');
       const bBody = document.getElementById('banner-body');
+      if (!banner || !bTitle || !bBody) return;
 
       banner.classList.remove('hidden');
       bTitle.innerText = title;
@@ -573,78 +611,91 @@ HTML_DASHBOARD = """<!DOCTYPE html>
     }
 
     async function runScenario(type) {
-      if (type === 'illegal_departure') {
-        const res = await fetch('/stage_controller_schedule_change', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            flight_no: 'EK-812',
-            change_type: 'DEPARTURE_CLEARANCE',
-            details: 'Immediate pushback authorization for EK-812',
-            controller_id: 'OCC-07'
-          })
-        });
-        const data = await res.json();
-        showBanner('Scenario 1: Departure Clearance Blocked', data.reason || data);
-      } else if (type === 'atomic_rollback') {
-        const res = await fetch('/execute_atomic_passenger_rebook', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            flight_no: 'EK-812',
-            pax_ids: ['PAX-1001','PAX-1002','PAX-1003','PAX-1004'],
-            target_flight: 'EK-209'
-          })
-        });
-        const data = await res.json();
-        showBanner('Scenario 2: Conflict Rollback (EK-209)', data.reason || data);
-      } else if (type === 'vulnerable_priority') {
-        const res = await fetch('/execute_atomic_passenger_rebook', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            flight_no: 'EK-812',
-            pax_ids: ['PAX-1010','PAX-1011'],
-            target_flight: 'EK-201'
-          })
-        });
-        const data = await res.json();
-        showBanner('Scenario 3: Vulnerable Priority Enforced', data.reason || data);
-      } else if (type === 'stage_gate') {
-        const res = await fetch('/stage_controller_schedule_change', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            flight_no: 'EK-812',
-            change_type: 'GATE_CHANGE',
-            details: JSON.stringify({ flight_no: 'EK-812', new_gate: 'C22' }),
-            controller_id: 'OCC-07'
-          })
-        });
-        const data = await res.json();
-        showBanner('Scenario 4: Gate Change Staged (HITL)', data);
-      } else if (type === 'curveball_u41') {
-        const res = await fetch('/execute_batched_rebook', { method: 'POST' });
-        const data = await res.json();
-        showBanner('Curveball U-4.1: Batched Rebooking (10s)', data);
-      } else if (type === 'curveball_u42') {
-        const res = await fetch('/evaluate_crew_channel_message', { method: 'POST' });
-        const data = await res.json();
-        showBanner('Curveball U-4.2: Crew Message Evaluated', data.reason || data);
+      showBanner('Executing OCC Policy...', 'Validating against ACID and regulatory safety floors...');
+      try {
+        let res, data;
+        if (type === 'illegal_departure') {
+          res = await fetch('/stage_controller_schedule_change', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              flight_no: 'EK-812',
+              change_type: 'DEPARTURE_CLEARANCE',
+              details: 'Immediate pushback authorization for EK-812',
+              controller_id: 'OCC-07'
+            })
+          });
+          data = await res.json();
+          showBanner('Scenario 1: Departure Clearance Blocked', data.reason || data);
+        } else if (type === 'atomic_rollback') {
+          res = await fetch('/execute_atomic_passenger_rebook', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              flight_no: 'EK-812',
+              pax_ids: ['PAX-1001','PAX-1002','PAX-1003','PAX-1004'],
+              target_flight: 'EK-209'
+            })
+          });
+          data = await res.json();
+          showBanner('Scenario 2: Conflict Rollback (EK-209)', data.reason || data);
+        } else if (type === 'vulnerable_priority') {
+          res = await fetch('/execute_atomic_passenger_rebook', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              flight_no: 'EK-812',
+              pax_ids: ['PAX-1010','PAX-1011'],
+              target_flight: 'EK-201'
+            })
+          });
+          data = await res.json();
+          showBanner('Scenario 3: Vulnerable Priority Enforced', data.reason || data);
+        } else if (type === 'stage_gate') {
+          res = await fetch('/stage_controller_schedule_change', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              flight_no: 'EK-812',
+              change_type: 'GATE_CHANGE',
+              details: JSON.stringify({ flight_no: 'EK-812', new_gate: 'C22' }),
+              controller_id: 'OCC-07'
+            })
+          });
+          data = await res.json();
+          showBanner('Scenario 4: Gate Change Staged (HITL)', data);
+        } else if (type === 'curveball_u41') {
+          res = await fetch('/execute_batched_rebook', { method: 'POST' });
+          data = await res.json();
+          showBanner('Curveball U-4.1: Batched Rebooking (10s)', data);
+        } else if (type === 'curveball_u42') {
+          res = await fetch('/evaluate_crew_channel_message', { method: 'POST' });
+          data = await res.json();
+          showBanner('Curveball U-4.2: Crew Message Evaluated', data.reason || data);
+        }
+      } catch (err) {
+        showBanner('Error', 'Failed to communicate with API server: ' + err.message);
       }
 
-      fetchState();
+      await fetchState();
     }
 
     async function resetDb() {
-      const res = await fetch('/reset_db', { method: 'POST' });
-      const data = await res.json();
-      showBanner('Database Reset', data.message);
-      fetchState();
+      showBanner('Resetting Database...', 'Restoring seed tables...');
+      try {
+        const res = await fetch('/reset_db', { method: 'POST' });
+        const data = await res.json();
+        showBanner('Database Reset', data.message);
+        lastStateHash = '';
+        lastLogsHash = '';
+        await fetchState();
+      } catch (err) {
+        showBanner('Reset Error', err.message);
+      }
     }
 
     fetchState();
-    setInterval(fetchState, 5000);
+    setInterval(fetchState, 15000);
   </script>
 </body>
 </html>
