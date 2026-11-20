@@ -6,12 +6,20 @@ from src.config import DB_PATH
 
 
 def get_conn() -> sqlite3.Connection:
-    if not os.path.exists(DB_PATH):
+    need_seed = not os.path.exists(DB_PATH)
+    if not need_seed:
         try:
-            from seed_db import seed_database
-            seed_database(DB_PATH)
-        except Exception as e:
-            print("Auto-seeding DB failed:", e)
+            chk = sqlite3.connect(DB_PATH)
+            row = chk.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='flights'").fetchone()
+            chk.close()
+            if not row or row[0] == 0:
+                need_seed = True
+        except Exception:
+            need_seed = True
+
+    if need_seed:
+        from seed_db import seed_database
+        seed_database(DB_PATH)
 
     conn = sqlite3.connect(DB_PATH, isolation_level=None)
     conn.row_factory = sqlite3.Row

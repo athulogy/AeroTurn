@@ -45,7 +45,11 @@ def api_dashboard():
 
 @app.get("/get_turnaround_and_crew_state", summary="Read-only state snapshot for the LLM agent")
 def api_get_state():
-    return get_turnaround_and_crew_state()
+    try:
+        return get_turnaround_and_crew_state()
+    except Exception as e:
+        import traceback
+        return JSONResponse(status_code=500, content={"error": str(e), "traceback": traceback.format_exc()})
 
 
 @app.post("/execute_atomic_passenger_rebook", summary="Atomic SQLite rebook with ROLLBACK on conflict")
