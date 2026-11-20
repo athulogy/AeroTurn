@@ -1,3 +1,4 @@
+import os
 import json
 import sqlite3
 import subprocess
@@ -22,6 +23,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+if os.path.exists("logo.jpg"):
+    st.sidebar.image("logo.jpg", use_container_width=True)
+    st.sidebar.markdown("---")
 
 # Custom Aviation Styling
 st.markdown(
