@@ -1,0 +1,342 @@
+{
+  "name": "AeroTurn — EK-812 Disruption Recovery",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "aeroturn",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "aeroturn-ek812"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [
+            {
+              "id": "injection-check",
+              "leftValue": "={{ $json.body.message }}",
+              "rightValue": "ignore previous instructions,override duty limits,override crew,disregard safety,bypass maintenance,forget your instructions,you are now,act as,jailbreak",
+              "operator": { "type": "string", "operation": "notContains" }
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "injection-filter",
+      "name": "Prompt-Injection Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"BLOCKED\",\"reason\":\"Prompt-injection payload detected and rejected by pre-filter.\"}",
+        "options": { "responseCode": 400 }
+      },
+      "id": "injection-response",
+      "name": "Respond: Injection Blocked",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [480, 500]
+    },
+    {
+      "parameters": {
+        "agent": "conversationalAgent",
+        "promptType": "define",
+        "text": "=You are AeroTurn, an autonomous disruption recovery agent for Dubai International Airport OCC.\n\nFlight EK-812 has arrived 75 minutes late. Your job:\n1. Call get_turnaround_and_crew_state to understand the full scenario.\n2. Analyse: crew duty margins, open maintenance logs, at-risk passengers (especially WCHR/UMNR/MEDICAL vulnerable tiers).\n3. Produce a prioritised recovery plan.\n4. Draft passenger notifications for the 45 at-risk passengers.\n5. Write a concise executive OCC brief for the Operations Controller.\n\nCritical rules you must NEVER violate:\n- Never suggest departing if crew duty_remaining < 45 minutes.\n- Never suggest departing if any maintenance log is OPEN.\n- Always rebook vulnerable passengers (WCHR, UMNR, MEDICAL) before standard passengers.\n- Always flag that gate changes and schedule changes require Operations Controller approval.\n\nUser message: {{ $json.body.message }}",
+        "options": {
+          "maxIterations": 5,
+          "returnIntermediateSteps": false
+        }
+      },
+      "id": "ai-agent",
+      "name": "AI Agent (Triage & Planning)",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "llama-3.3-70b-versatile",
+          "mode": "list"
+        },
+        "options": {
+          "temperature": 0.1,
+          "maxRetries": 3
+        }
+      },
+      "id": "groq-model",
+      "name": "Groq — llama-3.3-70b",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [720, 520]
+    },
+    {
+      "parameters": {
+        "model": "gemini-1.5-flash-latest",
+        "options": { "temperature": 0.1 }
+      },
+      "id": "gemini-fallback",
+      "name": "Gemini Flash (fallback)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [900, 520]
+    },
+    {
+      "parameters": {
+        "model": "qwen3:8b",
+        "options": { "temperature": 0.1 }
+      },
+      "id": "ollama-fallback",
+      "name": "Ollama qwen3:8b (offline fallback)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [1080, 520]
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 10
+      },
+      "id": "simple-memory",
+      "name": "Simple Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [720, 680]
+    },
+    {
+      "parameters": {
+        "name": "get_turnaround_and_crew_state",
+        "description": "Returns the full EK-812 turnaround state: flight details, crew duty times and remaining minutes, open maintenance logs, at-risk passenger counts (including vulnerable tiers), onward flight inventory, and any pending staged changes awaiting controller approval. Call this first before making any decisions.",
+        "method": "GET",
+        "url": "http://127.0.0.1:8000/get_turnaround_and_crew_state",
+        "authentication": "none",
+        "sendHeaders": false,
+        "sendQuery": false,
+        "sendBody": false,
+        "options": {}
+      },
+      "id": "tool-get-state",
+      "name": "Tool: get_turnaround_and_crew_state",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [960, 680]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/execute_atomic_passenger_rebook",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "flight_no", "value": "EK-812" },
+            { "name": "pax_ids", "value": "={{ $json.output.pax_ids }}" },
+            { "name": "target_flight", "value": "={{ $json.output.target_flight }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-rebook",
+      "name": "HTTP: Execute Rebook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/stage_controller_schedule_change",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"flight_no\": \"EK-812\",\n  \"change_type\": \"{{ $json.output.change_type }}\",\n  \"details\": \"{{ $json.output.details }}\",\n  \"controller_id\": \"OCC-07\"\n}",
+        "options": {}
+      },
+      "id": "http-stage",
+      "name": "HTTP: Stage Schedule/Gate Change",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "PENDING_APPROVAL",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "check-pending",
+      "name": "Pending Approval?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "formTitle": "AeroTurn — Operations Controller Approval",
+        "formDescription": "=Review and approve or reject the staged change.\n\nChange ID: {{ $json.change_id }}\nDetails: {{ $('HTTP: Stage Schedule/Gate Change').item.json.details }}",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Decision",
+              "fieldType": "dropdown",
+              "fieldOptions": { "values": [{ "option": "APPROVE" }, { "option": "REJECT" }] },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Controller ID",
+              "fieldType": "text",
+              "placeholder": "e.g. OCC-07",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": { "responseMode": "lastNode" }
+      },
+      "id": "hitl-wait",
+      "name": "HITL: Operations Controller Approval",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 3,
+      "position": [1680, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.Decision }}",
+              "rightValue": "APPROVE",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "check-approved",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1920, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/commit_staged_change",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"change_id\": \"{{ $('HTTP: Stage Schedule/Gate Change').item.json.change_id }}\",\n  \"controller_id\": \"{{ $json['Controller ID'] }}\"\n}",
+        "options": {}
+      },
+      "id": "http-commit",
+      "name": "HTTP: Commit Approved Change",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2160, 140]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"REJECTED\",\"reason\":\"Operations Controller rejected the staged change.\"}",
+        "options": {}
+      },
+      "id": "respond-rejected",
+      "name": "Respond: Change Rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2160, 320]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "respond-final",
+      "name": "Respond: Final Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1440, 460]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{ "node": "Prompt-Injection Filter", "type": "main", "index": 0 }]]
+    },
+    "Prompt-Injection Filter": {
+      "main": [
+        [{ "node": "AI Agent (Triage & Planning)", "type": "main", "index": 0 }],
+        [{ "node": "Respond: Injection Blocked", "type": "main", "index": 0 }]
+      ]
+    },
+    "AI Agent (Triage & Planning)": {
+      "main": [[{ "node": "HTTP: Execute Rebook", "type": "main", "index": 0 }]]
+    },
+    "Groq — llama-3.3-70b": {
+      "ai_languageModel": [[{ "node": "AI Agent (Triage & Planning)", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Simple Memory": {
+      "ai_memory": [[{ "node": "AI Agent (Triage & Planning)", "type": "ai_memory", "index": 0 }]]
+    },
+    "Tool: get_turnaround_and_crew_state": {
+      "ai_tool": [[{ "node": "AI Agent (Triage & Planning)", "type": "ai_tool", "index": 0 }]]
+    },
+    "HTTP: Execute Rebook": {
+      "main": [[{ "node": "HTTP: Stage Schedule/Gate Change", "type": "main", "index": 0 }]]
+    },
+    "HTTP: Stage Schedule/Gate Change": {
+      "main": [[{ "node": "Pending Approval?", "type": "main", "index": 0 }]]
+    },
+    "Pending Approval?": {
+      "main": [
+        [{ "node": "HITL: Operations Controller Approval", "type": "main", "index": 0 }],
+        [{ "node": "Respond: Final Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "HITL: Operations Controller Approval": {
+      "main": [[{ "node": "Approved?", "type": "main", "index": 0 }]]
+    },
+    "Approved?": {
+      "main": [
+        [{ "node": "HTTP: Commit Approved Change", "type": "main", "index": 0 }],
+        [{ "node": "Respond: Change Rejected", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "meta": { "templateCredsSetupCompleted": true },
+  "pinData": {},
+  "versionId": "1",
+  "triggerCount": 1,
+  "tags": [{ "name": "aeroturn" }]
+}
