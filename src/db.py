@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -5,9 +6,20 @@ from src.config import DB_PATH
 
 
 def get_conn() -> sqlite3.Connection:
+    if not os.path.exists(DB_PATH):
+        try:
+            import subprocess, sys
+            script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "seed_db.py")
+            subprocess.run([sys.executable, script], check=True)
+        except Exception:
+            pass
+
     conn = sqlite3.connect(DB_PATH, isolation_level=None)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        pass
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
