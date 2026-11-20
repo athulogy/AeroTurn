@@ -28,6 +28,26 @@ app = FastAPI(
 )
 
 
+@app.get("/", summary="Root landing page")
+def api_root():
+    return {
+        "project": "AeroTurn: Autonomous Turnaround & Atomic Disruption Recovery Agent",
+        "competition": "TechX Dubai '26 — Domain 4",
+        "scenario": "Flight EK-812 (DXB)",
+        "docs_url": "/docs",
+        "endpoints": [
+            "/docs",
+            "/get_turnaround_and_crew_state",
+            "/execute_atomic_passenger_rebook",
+            "/execute_batched_rebook",
+            "/evaluate_crew_channel_message",
+            "/stage_controller_schedule_change",
+            "/commit_staged_change",
+            "/audit_logs",
+        ],
+    }
+
+
 @app.get("/get_turnaround_and_crew_state", summary="Read-only state snapshot for the LLM agent")
 def api_get_state():
     return get_turnaround_and_crew_state()
